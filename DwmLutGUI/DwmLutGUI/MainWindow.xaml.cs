@@ -178,26 +178,54 @@ namespace DwmLutGUI
         {
             try
             {
-                string path = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-                RegistryKey key = Registry.CurrentUser.OpenSubKey(path, true);
-                if (key != null)
+                // 1. Cleanup old Registry key if it exists
+                string runKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(runKeyPath, true))
                 {
-                    if (enable)
+                    key?.DeleteValue("DwmLutGUI", false);
+                }
+
+                string taskName = "DwmLutGUI_Autostart";
+                string exePath = Assembly.GetExecutingAssembly().Location;
+                // For .NET app, Location might be the .dll, we want the .exe
+                if (exePath.EndsWith(".dll")) exePath = exePath.Replace(".dll", ".exe");
+
+                if (enable)
+                {
+                    // Create scheduled task: At log on, Highest Privileges
+                    // Using -apply to inject on start and -minimize to go to tray
+                    string args = $"/create /tn \"{taskName}\" /tr \"\\\"{exePath}\\\" -apply -minimize\" /sc onlogon /rl highest /f";
+                    
+                    ProcessStartInfo psi = new ProcessStartInfo("schtasks", args)
                     {
-                        string exePath = Assembly.GetExecutingAssembly().Location;
-                        // For .NET app, Location might be the .dll, we want the .exe
-                        if (exePath.EndsWith(".dll")) exePath = exePath.Replace(".dll", ".exe");
-                        key.SetValue("DwmLutGUI", $"\"{exePath}\" -minimize");
-                    }
-                    else
+                        CreateNoWindow = true,
+                        UseShellExecute = true,
+                        Verb = "runas", // Elevate once to create the secure task
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
+                }
+                else
+                {
+                    // Delete scheduled task
+                    string args = $"/delete /tn \"{taskName}\" /f";
+                    ProcessStartInfo psi = new ProcessStartInfo("schtasks", args)
                     {
-                        key.DeleteValue("DwmLutGUI", false);
-                    }
+                        CreateNoWindow = true,
+                        UseShellExecute = true,
+                        Verb = "runas",
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Error setting autostart: " + ex.Message);
+                // Simply ignore if user cancels the UAC prompt
+                if (!(ex is System.ComponentModel.Win32Exception))
+                {
+                    MessageBox.Show("Error managing autostart task: " + ex.Message);
+                }
             }
         }
 
