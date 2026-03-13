@@ -1,4 +1,9 @@
-// dllmain.cpp : Defines the entry point for the DLL application.
+/*
+ * Copyright (C) 2021 ledoge
+ * Modifications Copyright (C) 2026 Eduu
+ *
+ * This program is free software: you can redistribute it and/or modify...
+ */
 #include "pch.h"
 
 #include <io.h>
@@ -109,6 +114,11 @@ void log_to_file(const char* log_buf)
 	fprintf(pFile, "%s\n", log_buf);
 	fclose(pFile);
 }
+
+// Global variable to store found swapchain offset dynamically
+int g_DynamicSwapChainOffset = -1;
+
+void log_to_file(const char* log_buf);
 
 void print_error(const char* prefix_message)
 {
@@ -248,6 +258,30 @@ const unsigned char COverlayContext_IsCandidateDirectFlipCompatbile_bytes_w11_25
  */
 const unsigned char COverlayContext_OverlaysEnabled_bytes_w11_25h2[] = {
 	0x83, 0x3D, '?', '?', '?', '?', 0x05, 0x74, 0x09, 0x83, 0x79, 0x28, 0x01, 0x0F, 0x97, 0xC0, 0xC3
+};
+
+/**
+ * AOB for CWindowContext::IsCandidateDirectFlipCompatible in 25H2
+ * Forcing this to fail prevents borderless games from bypassing DWM (MPO/DirectFlip)
+ */
+const unsigned char CWindowContext_IsCandidateDirectFlipCompatible_bytes_w11_25h2[] = {
+	0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x41, 0x8B, 0xD9, 0x48, 0x8B, 0xF2, 0x4C, 0x8B, 0x01, 0x48, 0x8B, 0xF9
+};
+
+/**
+ * AOB for CCompSwapChain::IsCandidateDirectFlipCompatible in 25H2
+ * This is the critical one for modern Fullscreen/Independent Flip
+ */
+const unsigned char CCompSwapChain_IsCandidateDirectFlipCompatible_bytes_w11_25h2[] = {
+	0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08, 0x48, 0x89, 0x68, 0x10, 0x48, 0x89, 0x70, 0x18, 0x48, 0x89, 0x78, 0x20, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xDB, 0x41, 0x8B, 0xF0
+};
+
+/**
+ * AOB for CCompVisual::IsCandidateForPromotion in 25H2
+ * This prevents the window visual from being "promoted" to a hardware overlay (MPO)
+ */
+const unsigned char CCompVisual_IsCandidateForPromotion_bytes_w11_25h2[] = {
+	0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x01, 0x41, 0x8B, 0xD1, 0x48, 0x8B, 0xF1
 };
 
 // On 25H2: position stored as ints (not floats) at realObj+0xDC (left) and realObj+0xE0 (top)
@@ -632,9 +666,19 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 	if (isWindows11_25h2)
 	{
 		void* realObj = *(void**)context;
-		float* rect = (float*)((unsigned char*)realObj + 0x7698);
+		// On 25H2 Build 26200, let's use a fail-safe approach.
+		// If the window is fullscreen/maximized (like Roblox), we force 0,0 to catch it.
+		int* rect = (int*)((unsigned char*)realObj + 0x4D0); 
+		
 		left = (int)rect[0];
 		top = (int)rect[1];
+
+		// Roblox/Fullscreen detection: if the coordinates look like a "promotion" candidate or are 0
+		// we treat it as a full-screen application.
+		if ((left == 0 && top == 0) || (left < -2000 || left > 10000)) {
+			left = 0;
+			top = 0;
+		}
 	}
 	else if (isWindows11_24h2)
 	{
@@ -689,6 +733,19 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 			}
 		}
 	}
+
+	// Bulletproof fallback: If we still haven't found a LUT, just return the first one
+	// that matches the HDR state. This fixes F11 games that report wrong offsets in DWM.
+	for (int i = 0; i < numLuts; i++)
+	{
+		if (luts[i].isHdr == hdr)
+		{
+			return &luts[i];
+		}
+	}
+	
+	// Final fallback: just return the very first LUT we have.
+	if (numLuts > 0) return &luts[0];
 
 	return NULL;
 }
@@ -893,7 +950,11 @@ bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagREC
 	backBuffer->GetDesc(&newBackBufferDesc);
 
 	int index = -1;
-	if (newBackBufferDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM)
+	if (newBackBufferDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+	    newBackBufferDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM ||
+	    newBackBufferDesc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+	    newBackBufferDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+	    newBackBufferDesc.Format == DXGI_FORMAT_R10G10B10A2_UNORM)
 	{
 		index = 0;
 	}
@@ -1135,17 +1196,42 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 
 			if (isWindows11_25h2)
 			{
+				bool success = false;
 				// 25H2: Get texture directly from overlaySwapChain via vtable chain
 				ID3D11Texture2D* backBuffer = GetBackBuffer_25H2(overlaySwapChain);
 				if (backBuffer)
 				{
 					if (ApplyLUTDirect(self, backBuffer, rectVec->start, rectVec->end - rectVec->start))
+					{
 						SetLUTActive(self);
-					else
-						UnsetLUTActive(self);
+						success = true;
+					}
 					backBuffer->Release();
 				}
-				else
+				
+				if (!success) 
+				{
+					// Fallback: Search for IDXGISwapChain dynamically
+					// Fullscreen games like Roblox might not use the same overlay structure
+					IDXGISwapChain* swapChain = NULL;
+					for (int off = 0x80; off < 0x200; off += 8) {
+						void* ptr = *(void**)((unsigned char*)overlaySwapChain + off);
+						if (ptr != NULL && !IsBadReadPtr(ptr, 8)) {
+							void* vtable = *(void**)ptr;
+							if (vtable != NULL) {
+								swapChain = (IDXGISwapChain*)ptr;
+								// Try applying LUT, if it succeeds, we found the right pointer!
+								if (ApplyLUT(self, swapChain, rectVec->start, rectVec->end - rectVec->start)) {
+									SetLUTActive(self);
+									success = true;
+									break; 
+								}
+							}
+						}
+					}
+				}
+
+				if (!success)
 				{
 					UnsetLUTActive(self);
 				}
@@ -1262,6 +1348,54 @@ long COverlayContext_Present_hook(void* self, void* overlaySwapChain, unsigned i
 	return COverlayContext_Present_orig(self, overlaySwapChain, a3, rectVec, a5, a6);
 }
 
+typedef bool (CWindowContext_IsCandidateDirectFlipCompatbile_t)(void*, void*, bool);
+CWindowContext_IsCandidateDirectFlipCompatbile_t* CWindowContext_IsCandidateDirectFlipCompatbile_orig = NULL;
+
+bool CWindowContext_IsCandidateDirectFlipCompatbile_hook(void* self, void* a2, bool a3)
+{
+	if (numLuts > 0)
+	{
+		return false; // Aggressively block all DirectFlip candidates when LUT is active
+	}
+	return CWindowContext_IsCandidateDirectFlipCompatbile_orig(self, a2, a3);
+}
+
+typedef bool (CCompSwapChain_IsCandidateDirectFlipCompatbile_t)(void*, void*, bool);
+CCompSwapChain_IsCandidateDirectFlipCompatbile_t* CCompSwapChain_IsCandidateDirectFlipCompatbile_orig = NULL;
+
+bool CCompSwapChain_IsCandidateDirectFlipCompatbile_hook(void* self, void* a2, bool a3)
+{
+	if (numLuts > 0)
+	{
+		return false; // Force composition even for Independent Flip
+	}
+	return CCompSwapChain_IsCandidateDirectFlipCompatbile_orig(self, a2, a3);
+}
+
+typedef bool (CCompVisual_IsCandidateForPromotion_t)(void*, void*, void*);
+CCompVisual_IsCandidateForPromotion_t* CCompVisual_IsCandidateForPromotion_orig = NULL;
+
+bool CCompVisual_IsCandidateForPromotion_hook(void* self, void* a2, void* a3)
+{
+	if (numLuts > 0)
+	{
+		return false; // Universal flip blocker
+	}
+	return CCompVisual_IsCandidateForPromotion_orig(self, a2, a3);
+}
+
+typedef bool (CCompSwapChain_IsCandidateIndependentFlipCompatible_t)(void*);
+CCompSwapChain_IsCandidateIndependentFlipCompatible_t* CCompSwapChain_IsCandidateIndependentFlipCompatible_orig = NULL;
+
+bool CCompSwapChain_IsCandidateIndependentFlipCompatible_hook(void* self)
+{
+	if (numLuts > 0)
+	{
+		return false; // STOP F11/FULLSCREEN INDEPENDENT FLIPS
+	}
+	return CCompSwapChain_IsCandidateIndependentFlipCompatible_orig(self);
+}
+
 typedef bool (COverlayContext_IsCandidateDirectFlipCompatbile_t)(void*, void*, void*, void*, int, unsigned int, bool,
                                                                  bool);
 typedef bool (COverlayContext_IsCandidateDirectFlipCompatbile_24h2_t)(void*, void*, void*, void*, unsigned int, bool);
@@ -1272,7 +1406,7 @@ COverlayContext_IsCandidateDirectFlipCompatbile_24h2_t* COverlayContext_IsCandid
 bool COverlayContext_IsCandidateDirectFlipCompatbile_hook_24h2(void* self, void* a2, void* a3, void* a4, unsigned int a5,
 	bool a6)
 {
-	if (numLuts > 0)
+	if (IsLUTActive(self))
 	{
 		return false;
 	}
@@ -1282,7 +1416,7 @@ bool COverlayContext_IsCandidateDirectFlipCompatbile_hook_24h2(void* self, void*
 bool COverlayContext_IsCandidateDirectFlipCompatbile_hook(void* self, void* a2, void* a3, void* a4, int a5,
                                                           unsigned int a6, bool a7, bool a8)
 {
-	if (numLuts > 0)
+	if (IsLUTActive(self))
 	{
 		return false;
 	}
@@ -1295,7 +1429,7 @@ COverlayContext_OverlaysEnabled_t* COverlayContext_OverlaysEnabled_orig  = NULL;
 
 bool COverlayContext_OverlaysEnabled_hook(void* self)
 {
-	if (numLuts > 0)
+	if (IsLUTActive(self))
 	{
 		return false;
 	}
@@ -1371,19 +1505,50 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 						COverlayContext_IsCandidateDirectFlipCompatbile_orig_24h2 = (
 							COverlayContext_IsCandidateDirectFlipCompatbile_24h2_t*)address;
 					}
+					else if (!CWindowContext_IsCandidateDirectFlipCompatbile_orig && sizeof CWindowContext_IsCandidateDirectFlipCompatible_bytes_w11_25h2
+						<= moduleInfo.SizeOfImage - i && !aob_match_inverse(
+							address, CWindowContext_IsCandidateDirectFlipCompatible_bytes_w11_25h2,
+							sizeof CWindowContext_IsCandidateDirectFlipCompatible_bytes_w11_25h2))
+					{
+						CWindowContext_IsCandidateDirectFlipCompatbile_orig = (CWindowContext_IsCandidateDirectFlipCompatbile_t*)address;
+					}
+					else if (!CCompSwapChain_IsCandidateDirectFlipCompatbile_orig && sizeof CCompSwapChain_IsCandidateDirectFlipCompatible_bytes_w11_25h2
+						<= moduleInfo.SizeOfImage - i && !aob_match_inverse(
+							address, CCompSwapChain_IsCandidateDirectFlipCompatible_bytes_w11_25h2,
+							sizeof CCompSwapChain_IsCandidateDirectFlipCompatible_bytes_w11_25h2))
+					{
+						CCompSwapChain_IsCandidateDirectFlipCompatbile_orig = (CCompSwapChain_IsCandidateDirectFlipCompatbile_t*)address;
+					}
+					else if (!CCompVisual_IsCandidateForPromotion_orig && sizeof CCompVisual_IsCandidateForPromotion_bytes_w11_25h2
+						<= moduleInfo.SizeOfImage - i && !aob_match_inverse(
+							address, CCompVisual_IsCandidateForPromotion_bytes_w11_25h2,
+							sizeof CCompVisual_IsCandidateForPromotion_bytes_w11_25h2))
+					{
+						CCompVisual_IsCandidateForPromotion_orig = (CCompVisual_IsCandidateForPromotion_t*)address;
+					}
 					else if (!COverlayContext_OverlaysEnabled_orig && sizeof COverlayContext_OverlaysEnabled_bytes_w11_25h2
 						<= moduleInfo.SizeOfImage - i && !aob_match_inverse(
 							address, COverlayContext_OverlaysEnabled_bytes_w11_25h2,
 							sizeof COverlayContext_OverlaysEnabled_bytes_w11_25h2))
 					{
-						// 25H2 OverlaysEnabled is a direct function match (like W11)
 						COverlayContext_OverlaysEnabled_orig = (COverlayContext_OverlaysEnabled_t*)address;
 
-						// Extract the OverlayTestMode global variable address from the instruction:
-						// 83 3D [rip_offset32] 05 = cmp dword ptr [rip+offset], 5
-						// Global var addr = instruction_addr + 7 + *(int32_t*)(instruction_addr + 2)
+						// 25H2 / Build 26200 specific: 
+						// The instruction is: 83 3D [offset] 05 (CMP DWORD PTR [RIP+off], 5)
+						// We need to jump 2 bytes to get to the offset, then 4 bytes of offset, total 6 bytes + instruction end.
 						int rip_offset = *(int*)(address + 2);
 						g_pOverlayTestMode = (int*)(address + 7 + rip_offset);
+
+						// Hook Independent Flip Candidate check (The F11 blocker)
+						// Scan near OverlaysEnabled for the flip check function
+						const unsigned char flipMatch[] = { 0x48, 0x8D, 0x05 }; // LEA RAX, [vtable]
+						for (int j = 0; j < 500; j++) {
+							unsigned char* fAddr = address + j;
+							if (!memcmp(fAddr, flipMatch, 3)) {
+								CCompSwapChain_IsCandidateIndependentFlipCompatible_orig = (CCompSwapChain_IsCandidateIndependentFlipCompatible_t*)fAddr;
+								break;
+							}
+						}
 					}
 					if (COverlayContext_Present_orig_24h2 && COverlayContext_IsCandidateDirectFlipCompatbile_orig_24h2 &&
 						COverlayContext_OverlaysEnabled_orig)
@@ -1537,6 +1702,93 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 					MH_CreateHook((PVOID)COverlayContext_IsCandidateDirectFlipCompatbile_orig_24h2,
 						(PVOID)COverlayContext_IsCandidateDirectFlipCompatbile_hook_24h2,
 						(PVOID*)&COverlayContext_IsCandidateDirectFlipCompatbile_orig_24h2);
+
+				if (CWindowContext_IsCandidateDirectFlipCompatbile_orig)
+				{
+					MH_CreateHook((PVOID)CWindowContext_IsCandidateDirectFlipCompatbile_orig,
+						(PVOID)CWindowContext_IsCandidateDirectFlipCompatbile_hook,
+						(PVOID*)&CWindowContext_IsCandidateDirectFlipCompatbile_orig);
+					LOG_ONLY_ONCE("Hooked CWindowContext::IsCandidateDirectFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CWindowContext::IsCandidateDirectFlipCompatible")
+				}
+
+				if (CCompSwapChain_IsCandidateIndependentFlipCompatible_orig)
+				{
+					MH_CreateHook((PVOID)CCompSwapChain_IsCandidateIndependentFlipCompatible_orig,
+						(PVOID)CCompSwapChain_IsCandidateIndependentFlipCompatible_hook,
+						(PVOID*)&CCompSwapChain_IsCandidateIndependentFlipCompatible_orig);
+					LOG_ONLY_ONCE("Hooked CCompSwapChain::IsCandidateIndependentFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CCompSwapChain::IsCandidateIndependentFlipCompatible")
+				}
+
+				if (CCompSwapChain_IsCandidateDirectFlipCompatbile_orig)
+				{
+					MH_CreateHook((PVOID)CCompSwapChain_IsCandidateDirectFlipCompatbile_orig,
+						(PVOID)CCompSwapChain_IsCandidateDirectFlipCompatbile_hook,
+						(PVOID*)&CCompSwapChain_IsCandidateDirectFlipCompatbile_orig);
+					LOG_ONLY_ONCE("Hooked CCompSwapChain::IsCandidateDirectFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CCompSwapChain::IsCandidateDirectFlipCompatible")
+				}
+
+				if (CCompVisual_IsCandidateForPromotion_orig)
+				{
+					MH_CreateHook((PVOID)CCompVisual_IsCandidateForPromotion_orig,
+						(PVOID)CCompVisual_IsCandidateForPromotion_hook,
+						(PVOID*)&CCompVisual_IsCandidateForPromotion_orig);
+					LOG_ONLY_ONCE("Hooked CCompVisual::IsCandidateForPromotion")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CCompVisual::IsCandidateForPromotion")
+				}
+
+				if (CWindowContext_IsCandidateDirectFlipCompatbile_orig)
+				{
+					MH_CreateHook((PVOID)CWindowContext_IsCandidateDirectFlipCompatbile_orig,
+						(PVOID)CWindowContext_IsCandidateDirectFlipCompatbile_hook,
+						(PVOID*)&CWindowContext_IsCandidateDirectFlipCompatbile_orig);
+					LOG_ONLY_ONCE("Hooked CWindowContext::IsCandidateDirectFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CWindowContext::IsCandidateDirectFlipCompatible")
+				}
+
+				if (CCompSwapChain_IsCandidateDirectFlipCompatbile_orig)
+				{
+					MH_CreateHook((PVOID)CCompSwapChain_IsCandidateDirectFlipCompatbile_orig,
+						(PVOID)CCompSwapChain_IsCandidateDirectFlipCompatbile_hook,
+						(PVOID*)&CCompSwapChain_IsCandidateDirectFlipCompatbile_orig);
+					LOG_ONLY_ONCE("Hooked CCompSwapChain::IsCandidateDirectFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CCompSwapChain::IsCandidateDirectFlipCompatible")
+				}
+
+				if (CCompSwapChain_IsCandidateIndependentFlipCompatible_orig)
+				{
+					MH_CreateHook((PVOID)CCompSwapChain_IsCandidateIndependentFlipCompatible_orig,
+						(PVOID)CCompSwapChain_IsCandidateIndependentFlipCompatible_hook,
+						(PVOID*)&CCompSwapChain_IsCandidateIndependentFlipCompatible_orig);
+					LOG_ONLY_ONCE("Hooked CCompSwapChain::IsCandidateIndependentFlipCompatible")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find CCompSwapChain::IsCandidateIndependentFlipCompatible")
+				}
+
+				if (g_pOverlayTestMode != NULL)
+				{
+					*g_pOverlayTestMode = 5;
+					LOG_ONLY_ONCE("SUCCESS: Forced OverlayTestMode to 5")
+				}
+				else {
+					LOG_ONLY_ONCE("FAILED to find g_pOverlayTestMode")
+				}
+
 				MH_CreateHook((PVOID)COverlayContext_OverlaysEnabled_orig, (PVOID)COverlayContext_OverlaysEnabled_hook,
 				              (PVOID*)&COverlayContext_OverlaysEnabled_orig);
 				MH_EnableHook(MH_ALL_HOOKS);
