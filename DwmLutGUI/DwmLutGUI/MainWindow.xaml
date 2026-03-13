@@ -90,7 +90,7 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.HeaderTemplate>
                     </DataGridTemplateColumn>
-                    <!-- <DataGridTextColumn Header="SDR LUT" Width="*" Binding="{Binding SdrLutFilename}" /> -->
+                    
                     <DataGridTemplateColumn Header="HDR LUT" Width="*" IsReadOnly="False">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>

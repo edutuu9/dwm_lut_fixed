@@ -178,7 +178,7 @@ namespace DwmLutGUI
         {
             try
             {
-                // 1. Cleanup old Registry key if it exists
+                
                 string runKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(runKeyPath, true))
                 {
@@ -187,27 +187,27 @@ namespace DwmLutGUI
 
                 string taskName = "DwmLutGUI_Autostart";
                 string exePath = Assembly.GetExecutingAssembly().Location;
-                // For .NET app, Location might be the .dll, we want the .exe
+                
                 if (exePath.EndsWith(".dll")) exePath = exePath.Replace(".dll", ".exe");
 
                 if (enable)
                 {
-                    // Create scheduled task: At log on, Highest Privileges
-                    // Using -apply to inject on start and -minimize to go to tray
+                    
+                    
                     string args = $"/create /tn \"{taskName}\" /tr \"\\\"{exePath}\\\" -apply -minimize\" /sc onlogon /rl highest /f";
                     
                     ProcessStartInfo psi = new ProcessStartInfo("schtasks", args)
                     {
                         CreateNoWindow = true,
                         UseShellExecute = true,
-                        Verb = "runas", // Elevate once to create the secure task
+                        Verb = "runas", 
                         WindowStyle = ProcessWindowStyle.Hidden
                     };
                     Process.Start(psi);
                 }
                 else
                 {
-                    // Delete scheduled task
+                    
                     string args = $"/delete /tn \"{taskName}\" /f";
                     ProcessStartInfo psi = new ProcessStartInfo("schtasks", args)
                     {
@@ -221,7 +221,7 @@ namespace DwmLutGUI
             }
             catch (Exception ex)
             {
-                // Simply ignore if user cancels the UAC prompt
+                
                 if (!(ex is System.ComponentModel.Win32Exception))
                 {
                     MessageBox.Show("Error managing autostart task: " + ex.Message);

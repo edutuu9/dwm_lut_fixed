@@ -131,7 +131,7 @@ namespace DwmLutGUI
                 throw new Exception("Failed to impersonate logged on user");
             }
 
-            // Get username of the current process
+            
             StringBuilder userName = new StringBuilder(1024);
             uint userNameSize = (uint)userName.Capacity;
             var userNameResult = GetUserName(userName, ref userNameSize);
@@ -140,7 +140,7 @@ namespace DwmLutGUI
                 throw new Exception("Failed to get username");
             }
 
-            // Check if the username is SYSTEM
+            
             if (userName.ToString() != "SYSTEM")
             {
                 throw new Exception("Not running as SYSTEM");
