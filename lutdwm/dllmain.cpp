@@ -11,10 +11,10 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
-#pragma comment (lib, "d3d11.lib") // Maybe un-useful
+#pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "d3dcompiler.lib")
-#pragma comment (lib, "dxgi.lib") // Maybe un-useful
-#pragma comment (lib, "uuid.lib") // Maybe un-useful
+#pragma comment (lib, "dxgi.lib")
+#pragma comment (lib, "uuid.lib")
 #pragma comment (lib, "dxguid.lib")
 
 
@@ -84,11 +84,11 @@
 	}
 
 #else
-#define LOG_ONLY_ONCE(x) // NOP, not in debug mode
-#define MESSAGE_BOX_DBG(x, y) // NOP, not in debug mode
+#define LOG_ONLY_ONCE(x)
+#define MESSAGE_BOX_DBG(x, y)
 #define EXECUTE_WITH_LOG(winapi_func_hr) winapi_func_hr;
 #define EXECUTE_D3DCOMPILE_WITH_LOG(winapi_func_hr, error_interface) winapi_func_hr;
-#define LOG_ADDRESS(prefix_message, address) // NOP, not in debug mode
+#define LOG_ADDRESS(prefix_message, address)
 #endif
 
 
@@ -115,7 +115,7 @@ void log_to_file(const char* log_buf)
 	fclose(pFile);
 }
 
-// Global variable to store found swapchain offset dynamically
+
 int g_DynamicSwapChainOffset = -1;
 
 void log_to_file(const char* log_buf);
@@ -143,7 +143,7 @@ unsigned int lut_index(const unsigned int b, const unsigned int g, const unsigne
 
 #define LUT_ACCESS_INDEX(lut, b, g, r, c, lut_size) (*((float*)(lut) + lut_index(b, g, r, c, lut_size)))
 
-// Find relative address utility function
+
 void* get_relative_address(void* instruction_address, int offset, int instruction_size)
 {
 	int relative_offset = *(int*)((unsigned char*)instruction_address + offset);
@@ -215,7 +215,7 @@ const unsigned char COverlayContext_Present_bytes_w11_24h2[] = {
 	0x4C, 0x8B, 0xDC, 0x56, 0x41, 0x56
 };
 
-const int IOverlaySwapChain_IDXGISwapChain_offset_w11_24h2 = 0x108; // wrt OverlaySwapChain
+const int IOverlaySwapChain_IDXGISwapChain_offset_w11_24h2 = 0x108;
 
 const unsigned char COverlayContext_IsCandidateDirectFlipCompatbile_bytes_w11_24h2[] = {
 	0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, '?', 0x48, 0x89, 0x68, '?', 0x48, 0x89, 0x70, '?', 0x48, 0x89, 0x78, '?', 0x41, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xDB
@@ -284,12 +284,12 @@ const unsigned char CCompVisual_IsCandidateForPromotion_bytes_w11_25h2[] = {
 	0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x01, 0x41, 0x8B, 0xD1, 0x48, 0x8B, 0xF1
 };
 
-// On 25H2: position stored as ints (not floats) at realObj+0xDC (left) and realObj+0xE0 (top)
+
 int COverlayContext_DeviceClipBox_offset_w11_25h2 = 0x7698;
 
 const int IOverlaySwapChain_HardwareProtected_offset_w11_25h2 = 0x4C;
 
-// In 25H2, swap chain is obtained via vtable call at index 33 (offset 0x108)
+
 const int IOverlaySwapChain_GetSwapChain_vtable_offset_w11_25h2 = 0x108;
 
 
@@ -297,7 +297,7 @@ bool isWindows11 = false;
 bool isWindows11_24h2 = false;
 bool isWindows11_25h2 = false;
 
-// Pointer to DWM's OverlayTestMode global variable (found from OverlaysEnabled AOB)
+
 static int* g_pOverlayTestMode = NULL;
 
 bool aob_match_inverse(const void* buf1, const void* mask, const int buf_len)
@@ -356,7 +356,7 @@ float3 SampleLut(float3 index) {
 	return lutTex.Sample(smp, tex).rgb;
 }
 
-// adapted from https://doi.org/10.2312/egp.20211031
+
 void barycentricWeight(float3 r, out float4 bary, out int3 vert2, out int3 vert3) {
 	vert2 = int3(0, 0, 0); vert3 = int3(1, 1, 1);
 	int3 c = r.xyz >= r.yzx;
@@ -532,9 +532,9 @@ bool ParseLUT(lutData* lut, char* filename)
 			break;
 		}
 	}
-	// borgaccio
+
 	float* rawLut = (float*)malloc(lutSize * lutSize * lutSize * 4 * sizeof(float));
-	// lut_3d_vec rawLut(lutSize, { lutSize, {lutSize, RGBA_VEC} });
+
 
 	for (int b = 0; b < lutSize; b++)
 	{
@@ -547,7 +547,7 @@ bool ParseLUT(lutData* lut, char* filename)
 					if (!fgets(line, sizeof(line), file))
 					{
 						fclose(file);
-						// free(rawLut);
+
 						return false;
 					}
 					if (line[0] <= '9' && line[0] != '#' && line[0] != '\n')
@@ -557,7 +557,7 @@ bool ParseLUT(lutData* lut, char* filename)
 						if (sscanf(line, "%f%f%f", &red, &green, &blue) != 3)
 						{
 							fclose(file);
-							// free(rawLut);
+
 							return false;
 						}
 						LUT_ACCESS_INDEX(rawLut, b, g, r, 0, lutSize) = red;
@@ -621,8 +621,8 @@ bool AddLUTs(char* folder)
 int numLutTargets;
 void** lutTargets;
 
-// 25H2: Track which COverlayContext was initially HDR (main monitor)
-// When a game disables HDR, this context switches to SDR but we still want to apply the LUT to it
+
+
 static void* g_primaryHdrContext = NULL;
 
 bool IsLUTActive(void* target)
@@ -666,15 +666,15 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 	if (isWindows11_25h2)
 	{
 		void* realObj = *(void**)context;
-		// On 25H2 Build 26200, let's use a fail-safe approach.
-		// If the window is fullscreen/maximized (like Roblox), we force 0,0 to catch it.
-		int* rect = (int*)((unsigned char*)realObj + 0x4D0); 
-		
+
+
+		int* rect = (int*)((unsigned char*)realObj + 0x4D0);
+
 		left = (int)rect[0];
 		top = (int)rect[1];
 
-		// Roblox/Fullscreen detection: if the coordinates look like a "promotion" candidate or are 0
-		// we treat it as a full-screen application.
+
+
 		if ((left == 0 && top == 0) || (left < -2000 || left > 10000)) {
 			left = 0;
 			top = 0;
@@ -689,7 +689,7 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 		sprintf(message_buf, "Left: %d, Top: %d", left, top);
 		LOG_ONLY_ONCE(message_buf)
 
-		// Put rect address in message
+
 		sprintf(message_buf, "Rect address: 0x%p", rect);
 		LOG_ONLY_ONCE(message_buf)
 	}
@@ -702,7 +702,7 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 		sprintf(message_buf, "Left: %d, Top: %d", left, top);
 		LOG_ONLY_ONCE(message_buf)
 
-		// Put rect address in message
+
 		sprintf(message_buf, "Rect address: 0x%p", rect);
 		LOG_ONLY_ONCE(message_buf)
 	}
@@ -721,8 +721,8 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 		}
 	}
 
-	// 25H2 fallback: if this is the primary HDR context but no matching LUT found
-	// (game disabled HDR, context switched to SDR), try matching with opposite HDR flag
+
+
 	if (isWindows11_25h2 && g_primaryHdrContext == context)
 	{
 		for (int i = 0; i < numLuts; i++)
@@ -734,8 +734,8 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 		}
 	}
 
-	// Bulletproof fallback: If we still haven't found a LUT, just return the first one
-	// that matches the HDR state. This fixes F11 games that report wrong offsets in DWM.
+
+
 	for (int i = 0; i < numLuts; i++)
 	{
 		if (luts[i].isHdr == hdr)
@@ -743,8 +743,8 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 			return &luts[i];
 		}
 	}
-	
-	// Final fallback: just return the very first LUT we have.
+
+
 	if (numLuts > 0) return &luts[0];
 
 	return NULL;
@@ -941,7 +941,7 @@ void UninitializeStuff()
 	free(lutTargets);
 }
 
-// Shared rendering core. Does NOT release backBuffer - caller handles it.
+
 bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagRECT* rects, int numRects)
 {
 	ID3D11RenderTargetView* renderTargetView;
@@ -961,7 +961,7 @@ bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagREC
 	else if (newBackBufferDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
 	{
 		index = 1;
-		// 25H2: Remember which context uses HDR - this is the primary/main monitor
+
 		if (isWindows11_25h2 && g_primaryHdrContext == NULL)
 		{
 			g_primaryHdrContext = cOverlayContext;
@@ -1093,7 +1093,7 @@ bool ApplyLUT(void* cOverlayContext, IDXGISwapChain* swapChain, struct tagRECT* 
 	}
 }
 
-// Apply LUT directly from a back buffer texture (25H2 path - no swap chain needed)
+
 bool ApplyLUTDirect(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagRECT* rects, int numRects)
 {
 	try
@@ -1134,8 +1134,8 @@ typedef struct rectVec
 typedef long (COverlayContext_Present_t)(void*, void*, unsigned int, rectVec*, unsigned int, bool);
 typedef long long (COverlayContext_Present_24h2_t)(void*, void*, unsigned int, rectVec*, int, void*, bool);
 
-// Get back buffer texture from overlaySwapChain on 25H2
-// On 25H2, no IDXGISwapChain exists. Instead: overlaySwapChain->vt[24]() -> result->vt[19]() -> QI(ID3D11Texture2D)
+
+
 static ID3D11Texture2D* GetBackBuffer_25H2(void* overlaySwapChain)
 {
 	__try
@@ -1197,7 +1197,7 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 			if (isWindows11_25h2)
 			{
 				bool success = false;
-				// 25H2: Get texture directly from overlaySwapChain via vtable chain
+
 				ID3D11Texture2D* backBuffer = GetBackBuffer_25H2(overlaySwapChain);
 				if (backBuffer)
 				{
@@ -1208,11 +1208,11 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 					}
 					backBuffer->Release();
 				}
-				
-				if (!success) 
+
+				if (!success)
 				{
-					// Fallback: Search for IDXGISwapChain dynamically
-					// Fullscreen games like Roblox might not use the same overlay structure
+
+
 					IDXGISwapChain* swapChain = NULL;
 					for (int off = 0x80; off < 0x200; off += 8) {
 						void* ptr = *(void**)((unsigned char*)overlaySwapChain + off);
@@ -1220,11 +1220,11 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 							void* vtable = *(void**)ptr;
 							if (vtable != NULL) {
 								swapChain = (IDXGISwapChain*)ptr;
-								// Try applying LUT, if it succeeds, we found the right pointer!
+
 								if (ApplyLUT(self, swapChain, rectVec->start, rectVec->end - rectVec->start)) {
 									SetLUTActive(self);
 									success = true;
-									break; 
+									break;
 								}
 							}
 						}
@@ -1288,7 +1288,7 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 					UnsetLUTActive(self);
 				}
 			}
-			} // end else (non-25H2)
+			}
 	}
 
 	return COverlayContext_Present_orig_24h2(self, overlaySwapChain, a3, rectVec, a5, a6, a7);
@@ -1355,7 +1355,7 @@ bool CWindowContext_IsCandidateDirectFlipCompatbile_hook(void* self, void* a2, b
 {
 	if (numLuts > 0)
 	{
-		return false; // Aggressively block all DirectFlip candidates when LUT is active
+		return false;
 	}
 	return CWindowContext_IsCandidateDirectFlipCompatbile_orig(self, a2, a3);
 }
@@ -1367,7 +1367,7 @@ bool CCompSwapChain_IsCandidateDirectFlipCompatbile_hook(void* self, void* a2, b
 {
 	if (numLuts > 0)
 	{
-		return false; // Force composition even for Independent Flip
+		return false;
 	}
 	return CCompSwapChain_IsCandidateDirectFlipCompatbile_orig(self, a2, a3);
 }
@@ -1379,7 +1379,7 @@ bool CCompVisual_IsCandidateForPromotion_hook(void* self, void* a2, void* a3)
 {
 	if (numLuts > 0)
 	{
-		return false; // Universal flip blocker
+		return false;
 	}
 	return CCompVisual_IsCandidateForPromotion_orig(self, a2, a3);
 }
@@ -1391,7 +1391,7 @@ bool CCompSwapChain_IsCandidateIndependentFlipCompatible_hook(void* self)
 {
 	if (numLuts > 0)
 	{
-		return false; // STOP F11/FULLSCREEN INDEPENDENT FLIPS
+		return false;
 	}
 	return CCompSwapChain_IsCandidateIndependentFlipCompatible_orig(self);
 }
@@ -1451,13 +1451,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 			versionInfo.dwOSVersionInfoSize = sizeof OSVERSIONINFOEX;
 			versionInfo.dwBuildNumber = 22000;
 
-			// Version info for windows 11 24h2
+
 			OSVERSIONINFOEX versionInfo24h2;
 			ZeroMemory(&versionInfo24h2, sizeof OSVERSIONINFOEX);
 			versionInfo24h2.dwOSVersionInfoSize = sizeof OSVERSIONINFOEX;
 			versionInfo24h2.dwBuildNumber = 26100;
 
-			// Version info for windows 11 25h2
+
 			OSVERSIONINFOEX versionInfo25h2;
 			ZeroMemory(&versionInfo25h2, sizeof OSVERSIONINFOEX);
 			versionInfo25h2.dwOSVersionInfoSize = sizeof OSVERSIONINFOEX;
@@ -1533,15 +1533,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 					{
 						COverlayContext_OverlaysEnabled_orig = (COverlayContext_OverlaysEnabled_t*)address;
 
-						// 25H2 / Build 26200 specific: 
-						// The instruction is: 83 3D [offset] 05 (CMP DWORD PTR [RIP+off], 5)
-						// We need to jump 2 bytes to get to the offset, then 4 bytes of offset, total 6 bytes + instruction end.
+
+
+
 						int rip_offset = *(int*)(address + 2);
 						g_pOverlayTestMode = (int*)(address + 7 + rip_offset);
 
-						// Hook Independent Flip Candidate check (The F11 blocker)
-						// Scan near OverlaysEnabled for the flip check function
-						const unsigned char flipMatch[] = { 0x48, 0x8D, 0x05 }; // LEA RAX, [vtable]
+
+
+						const unsigned char flipMatch[] = { 0x48, 0x8D, 0x05 };
 						for (int j = 0; j < 500; j++) {
 							unsigned char* fAddr = address + j;
 							if (!memcmp(fAddr, flipMatch, 3)) {
@@ -1636,7 +1636,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 
 				if (rev >= 706)
 				{
-					// COverlayContext_DeviceClipBox_offset_w11 += 8;
+
 				}
 			}
 			else
@@ -1794,7 +1794,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 				MH_EnableHook(MH_ALL_HOOKS);
 				LOG_ONLY_ONCE("DWM HOOK DLL INITIALIZATION. START LOGGING")
 
-				// Disable DirectFlip/MPO by setting DWM's internal OverlayTestMode to 5
+
 				if (g_pOverlayTestMode != NULL)
 				{
 					*g_pOverlayTestMode = 5;
@@ -1806,7 +1806,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved)
 			return FALSE;
 		}
 	case DLL_PROCESS_DETACH:
-		// Restore OverlayTestMode
+
 		if (g_pOverlayTestMode != NULL)
 		{
 			*g_pOverlayTestMode = 0;
