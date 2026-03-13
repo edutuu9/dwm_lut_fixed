@@ -1,6 +1,10 @@
 # A fork of the [original dwm_lut](https://github.com/ledoge/dwm_lut) - Updated for Windows 11 25H2
 ## [Download latest pre-release (Supports Windows 11 25H2 / Build 26200)](https://github.com/lauralex/dwm_lut/releases/latest)
 
+## Credits
+- **Original Author**: [ledoge](https://github.com/ledoge/dwm_lut)
+- **25H2 Update & Maintenance**: [Eduu](https://github.com/edutuu9/dwm_lut_fixed)
+
 ## Dependencies
 - Visual C++ runtime (https://www.techpowerup.com/download/visual-c-redistributable-runtime-package-all-in-one/)
 
@@ -29,4 +33,3 @@ Install [vcpkg](https://vcpkg.io/en/getting-started.html) for C++ dependency man
 - `.\vcpkg\vcpkg.exe integrate install`
 
 Open the projects in Visual Studio 2022 and compile a **x64 Release** build. Ensure you have the C++ Desktop Development workload installed.
-
