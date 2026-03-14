@@ -270,26 +270,27 @@ namespace DwmLutGUI
             {
                 try
                 {
+                    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)3072; // TLS 1.2 + 1.3
                     using (var client = new WebClient())
                     {
                         string content = client.DownloadString("https://raw.githubusercontent.com/edutuu9/dwm_lut_fixed/master/README.md");
                         var match = Regex.Match(content, @"Current Version: (v\d+\.\d+\.\d+)");
                         if (match.Success)
                         {
-                            string latestVersion = match.Groups[1].Value;
-                            string currentVersion = "v1.0.4";
+                            string latestVersionStr = match.Groups[1].Value;
+                            string currentVersion = "v" + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
 
-                            if (latestVersion != currentVersion)
+                            if (latestVersionStr != currentVersion)
                             {
                                 Dispatcher.Invoke(() =>
                                 {
-                                    var result = MessageBox.Show(
+                                    var result = System.Windows.MessageBox.Show(
                                         $"A new version is available: {latestVersion}\n\nWould you like to download it now?",
                                         "Update Available",
-                                        MessageBoxButtons.YesNo,
-                                        MessageBoxIcon.Information);
+                                        System.Windows.MessageBoxButton.YesNo,
+                                        System.Windows.MessageBoxImage.Information);
 
-                                    if (result == DialogResult.Yes)
+                                    if (result == System.Windows.MessageBoxResult.Yes)
                                     {
                                         Process.Start(new ProcessStartInfo($"https://github.com/edutuu9/dwm_lut_fixed/releases/tag/{latestVersion}") { UseShellExecute = true });
                                     }
