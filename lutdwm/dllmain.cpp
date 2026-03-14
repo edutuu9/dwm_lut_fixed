@@ -1054,8 +1054,6 @@ bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagREC
 
 	deviceContext->PSSetConstantBuffers(0, 1, &constantBuffer);
 
-	// Optimization: Copy the relevant parts of the backbuffer to our staging texture once.
-	// We copy the entire backbuffer area currently used to be safe and efficient.
 	D3D11_BOX sourceBox;
 	sourceBox.left = 0;
 	sourceBox.top = 0;
