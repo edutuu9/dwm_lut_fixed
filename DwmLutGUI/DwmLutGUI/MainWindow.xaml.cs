@@ -270,6 +270,11 @@ namespace DwmLutGUI
             window.ShowDialog();
         }
 
+        private void DiscordButton_Click(object sender, RoutedEventArgs e)
+        {
+            Process.Start(new ProcessStartInfo("https://discord.gg/R9CV5Gzq") { UseShellExecute = true });
+        }
+
         private void SdrLutBrowse_Click(object sender, RoutedEventArgs e)
         {
             var folder = Path.GetDirectoryName(_viewModel.SdrLutPath);
