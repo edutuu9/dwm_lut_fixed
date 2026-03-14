@@ -11,6 +11,8 @@ using System.Windows.Controls;
 using System.Windows.Forms;
 using System.Windows.Input;
 using Microsoft.Win32;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
 using ContextMenu = System.Windows.Forms.ContextMenu;
 using MenuItem = System.Windows.Forms.MenuItem;
 using MessageBox = System.Windows.Forms.MessageBox;
@@ -28,6 +30,11 @@ namespace DwmLutGUI
         private readonly MenuItem _disableItem;
         private readonly MenuItem _disableAndExitItem;
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
         public MainWindow()
         {
             try
@@ -40,6 +47,7 @@ namespace DwmLutGUI
                 }
 
                 InitializeComponent();
+                ApplyDarkMode();
                 _viewModel = (MainViewModel)DataContext;
                 _applyOnCooldown = false;
 
@@ -380,6 +388,13 @@ namespace DwmLutGUI
             if (monitor == null) return;
             monitor.HdrLuts.Remove(monitor.HdrLutPath);
             monitor.HdrLutPath = monitor.HdrLuts.FirstOrDefault() ?? "None";
+        }
+
+        private void ApplyDarkMode()
+        {
+            IntPtr hwnd = new WindowInteropHelper(this).EnsureHandle();
+            int useDarkMode = 1;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
         }
     }
 }
