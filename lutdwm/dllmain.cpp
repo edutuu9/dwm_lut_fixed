@@ -109,12 +109,13 @@ void log_to_file(const char* log_buf)
 	fprintf(pFile, "%s\n", log_buf);
 	fclose(pFile);
 }
+#endif
 
+static int g_DynamicSwapChainOffset = -1;
+static ID3D11Texture2D* g_CachedBackBuffer = NULL;
+static ID3D11RenderTargetView* g_CachedRTV = NULL;
 
-int g_DynamicSwapChainOffset = -1;
-
-void log_to_file(const char* log_buf);
-
+#if DEBUG_MODE == true
 void print_error(const char* prefix_message)
 {
 	DWORD errorCode = GetLastError();
@@ -618,6 +619,15 @@ void UnsetLUTActive(void* target)
 
 lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 {
+	static void* last_context = NULL;
+	static lutData* last_lut = NULL;
+	static bool last_hdr = false;
+
+	if (context == last_context && last_lut != NULL && last_hdr == hdr)
+	{
+		return last_lut;
+	}
+
 	int left, top;
 
 	if (isWindows11_25h2)
@@ -674,6 +684,9 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 	{
 		if (luts[i].left == left && luts[i].top == top && luts[i].isHdr == hdr)
 		{
+			last_context = context;
+			last_lut = &luts[i];
+			last_hdr = hdr;
 			return &luts[i];
 		}
 	}
@@ -702,7 +715,13 @@ lutData* GetLUTDataFromCOverlayContext(void* context, bool hdr)
 	}
 
 
-	if (numLuts > 0) return &luts[0];
+	if (numLuts > 0) 
+	{
+		last_context = context;
+		last_lut = &luts[0];
+		last_hdr = hdr;
+		return &luts[0];
+	}
 
 	return NULL;
 }
@@ -964,9 +983,23 @@ bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagREC
 	}
 
 	backBufferDesc = newBackBufferDesc;
+	if (index == 0) // Only cache for SDR (index 0) to avoid complexity with multi-monitor HDR switching for now
+	{
+		if (g_CachedBackBuffer != backBuffer)
+		{
+			RELEASE_IF_NOT_NULL(g_CachedRTV)
+			EXECUTE_WITH_LOG(device->CreateRenderTargetView((ID3D11Resource*)backBuffer, NULL, &g_CachedRTV))
+			g_CachedBackBuffer = backBuffer;
+		}
+		renderTargetView = g_CachedRTV;
+		renderTargetView->AddRef();
+	}
+	else
+	{
+		EXECUTE_WITH_LOG(device->CreateRenderTargetView((ID3D11Resource*)backBuffer, NULL, &renderTargetView))
+	}
 
-	EXECUTE_WITH_LOG(device->CreateRenderTargetView((ID3D11Resource*)backBuffer, NULL, &renderTargetView))
-	const D3D11_VIEWPORT d3d11_viewport(0, 0, backBufferDesc.Width, backBufferDesc.Height, 0.0f, 1.0f);
+	const D3D11_VIEWPORT d3d11_viewport(0, 0, (float)backBufferDesc.Width, (float)backBufferDesc.Height, 0.0f, 1.0f);
 	deviceContext->RSSetViewports(1, &d3d11_viewport);
 
 	deviceContext->OMSetRenderTargets(1, &renderTargetView, NULL);
@@ -974,24 +1007,29 @@ bool RenderLUT(void* cOverlayContext, ID3D11Texture2D* backBuffer, struct tagREC
 
 	deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 	deviceContext->IASetInputLayout(inputLayout);
-
 	deviceContext->VSSetShader(vertexShader, NULL, 0);
 	deviceContext->PSSetShader(pixelShader, NULL, 0);
+	deviceContext->PSSetSamplers(0, 1, &samplerState);
+	deviceContext->PSSetSamplers(1, 1, &noiseSamplerState);
 
 	deviceContext->PSSetShaderResources(0, 1, &textureView[index]);
 	deviceContext->PSSetShaderResources(1, 1, &lut->textureView);
-	deviceContext->PSSetSamplers(0, 1, &samplerState);
-
 	deviceContext->PSSetShaderResources(2, 1, &noiseTextureView);
-	deviceContext->PSSetSamplers(1, 1, &noiseSamplerState);
 
-	int constantData[4] = {lut->size, index == 1};
+	static int lastLutSize[2] = {-1, -1};
+	static bool lastIsHdr[2] = {false, false};
 
-	D3D11_MAPPED_SUBRESOURCE resource;
-	EXECUTE_WITH_LOG(deviceContext->Map((ID3D11Resource*)constantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0,
-		&resource))
-	memcpy(resource.pData, constantData, sizeof(constantData));
-	deviceContext->Unmap((ID3D11Resource*)constantBuffer, 0);
+	if (lastLutSize[index] != lut->size || lastIsHdr[index] != (index == 1))
+	{
+		int constantData[4] = {lut->size, index == 1};
+		D3D11_MAPPED_SUBRESOURCE resource;
+		EXECUTE_WITH_LOG(deviceContext->Map((ID3D11Resource*)constantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource))
+		memcpy(resource.pData, constantData, sizeof(constantData));
+		deviceContext->Unmap((ID3D11Resource*)constantBuffer, 0);
+		
+		lastLutSize[index] = lut->size;
+		lastIsHdr[index] = (index == 1);
+	}
 
 	deviceContext->PSSetConstantBuffers(0, 1, &constantBuffer);
 
@@ -1168,20 +1206,38 @@ long long COverlayContext_Present_hook_24h2(void* self, void* overlaySwapChain, 
 
 				if (!success)
 				{
+					if (g_DynamicSwapChainOffset != -1)
+					{
+						IDXGISwapChain* swapChain = *(IDXGISwapChain**)((unsigned char*)overlaySwapChain + g_DynamicSwapChainOffset);
+						if (swapChain != NULL && !IsBadReadPtr(swapChain, 8))
+						{
+							if (ApplyLUT(self, swapChain, rectVec->start, rectVec->end - rectVec->start))
+							{
+								SetLUTActive(self);
+								success = true;
+							}
+						}
+					}
 
+					if (!success)
+					{
+						for (int off = 0x80; off < 0x240; off += 8)
+						{
+							void* ptr = *(void**)((unsigned char*)overlaySwapChain + off);
+							if (ptr != NULL && !IsBadReadPtr(ptr, 8))
+							{
+								void* vtable = *(void**)ptr;
+								if (vtable != NULL)
+								{
+									IDXGISwapChain* swapChain = (IDXGISwapChain*)ptr;
 
-					IDXGISwapChain* swapChain = NULL;
-					for (int off = 0x80; off < 0x200; off += 8) {
-						void* ptr = *(void**)((unsigned char*)overlaySwapChain + off);
-						if (ptr != NULL && !IsBadReadPtr(ptr, 8)) {
-							void* vtable = *(void**)ptr;
-							if (vtable != NULL) {
-								swapChain = (IDXGISwapChain*)ptr;
-
-								if (ApplyLUT(self, swapChain, rectVec->start, rectVec->end - rectVec->start)) {
-									SetLUTActive(self);
-									success = true;
-									break;
+									if (ApplyLUT(self, swapChain, rectVec->start, rectVec->end - rectVec->start))
+									{
+										g_DynamicSwapChainOffset = off;
+										SetLUTActive(self);
+										success = true;
+										break;
+									}
 								}
 							}
 						}
